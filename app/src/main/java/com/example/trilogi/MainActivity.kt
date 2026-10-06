@@ -39,7 +39,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         Log.d(TAG, "onCreate: Activity dibuat dan resource diinisialisasi")
-        currentStatus = "Status: onCreate (Inisialisasi Selesai)"
+        currentStatus = "Status: onCreateeeee (Inisialisasi Selesai)"
 
         setContent {
             TrilogiTheme {
