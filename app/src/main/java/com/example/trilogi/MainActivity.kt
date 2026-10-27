@@ -1,17 +1,17 @@
 package com.example.trilogi
 
-import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
+import android.util.Patterns
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -23,8 +23,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             TrilogiTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    IntentDemoScreen(modifier = Modifier.padding(innerPadding))
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    FormulirBeasiswaScreen()
                 }
             }
         }
@@ -32,75 +32,160 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun IntentDemoScreen(modifier: Modifier = Modifier) {
-    // LocalContext diperlukan untuk menjalankan Intent di dalam Compose
-    val context = LocalContext.current
-    var nameInput by remember { mutableStateOf("") }
+fun FormulirBeasiswaScreen() {
+    // STATE MANAGEMENT: Menggunakan rememberSaveable sebagai pengganti onSaveInstanceState.
+    // Ini mencegah 'The Disappearing Data Problem' (State Loss) saat terjadi rotasi layar ponsel.
+    var nama by rememberSaveable { mutableStateOf("") }
+    var nim by rememberSaveable { mutableStateOf("") }
+    var email by rememberSaveable { mutableStateOf("") }
+    var ipk by rememberSaveable { mutableStateOf("") }
+
+    // State untuk menyimpan pesan error spesifik
+    var namaError by rememberSaveable { mutableStateOf<String?>(null) }
+    var nimError by rememberSaveable { mutableStateOf<String?>(null) }
+    var emailError by rememberSaveable { mutableStateOf<String?>(null) }
+    var ipkError by rememberSaveable { mutableStateOf<String?>(null) }
+
+    var statusMessage by rememberSaveable { mutableStateOf("") }
+
+    val scrollState = rememberScrollState()
 
     Column(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(24.dp)
+            .verticalScroll(scrollState),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
-            text = "Pertemuan 4: Intent & Navigasi",
+            text = "Formulir Pendaftaran Beasiswa",
             fontSize = 20.sp,
-            fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary
         )
-
         HorizontalDivider()
 
+        // INPUT: Nama
         OutlinedTextField(
-            value = nameInput,
-            onValueChange = { nameInput = it },
-            label = { Text("Masukkan Nama Anda") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
+            value = nama,
+            onValueChange = {
+                nama = it
+                namaError = null // Konsep instant feedback (mirip doAfterTextChanged)
+            },
+            label = { Text("Nama Lengkap") },
+            isError = namaError != null,
+            supportingText = { namaError?.let { Text(it) } },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        // INPUT: NIM (8-10 digit)
+        OutlinedTextField(
+            value = nim,
+            onValueChange = {
+                nim = it
+                nimError = null
+            },
+            label = { Text("NIM") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            isError = nimError != null,
+            supportingText = { nimError?.let { Text(it) } },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        // INPUT: Email
+        OutlinedTextField(
+            value = email,
+            onValueChange = {
+                email = it
+                emailError = null
+            },
+            label = { Text("Email Mahasiswa") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+            isError = emailError != null,
+            supportingText = { emailError?.let { Text(it) } },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        // INPUT: IPK (Double 0.00-4.00)
+        OutlinedTextField(
+            value = ipk,
+            onValueChange = {
+                ipk = it
+                ipkError = null
+            },
+            label = { Text("IPK") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            isError = ipkError != null,
+            supportingText = { ipkError?.let { Text(it) } },
+            modifier = Modifier.fillMaxWidth()
         )
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // --- EXPLICIT INTENT ---
         Button(
             onClick = {
-                // Mengirim data antar Activity menggunakan Key-Value Pair
-                val intent = Intent(context, DetailActivity::class.java).apply {
-                    putExtra("EXTRA_NAME", nameInput)     // Tipe Data String
-                    putExtra("EXTRA_SEMESTER", 5)         // Tipe Data Int
-                    putExtra("EXTRA_IS_ACTIVE", true)     // Tipe Data Boolean
+                var isValid = true
+
+                // Validasi Nama
+                if (nama.isBlank()) {
+                    namaError = "Nama wajib diisi!"
+                    isValid = false
                 }
-                context.startActivity(intent)
+
+                // Validasi NIM: Panjang karakter 8-10 digit
+                if (nim.length !in 8..10) {
+                    nimError = "NIM harus berjumlah 8 hingga 10 digit!"
+                    isValid = false
+                }
+
+                // Validasi Email: Menggunakan Patterns.EMAIL_ADDRESS
+                if (!Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
+                    emailError = "Format email tidak valid!"
+                    isValid = false
+                }
+
+                // Validasi IPK: Konversi angka aman menggunakan toDoubleOrNull()
+                val ipkValue = ipk.toDoubleOrNull()
+                if (ipkValue == null || ipkValue < 0.0 || ipkValue > 4.0) {
+                    ipkError = "IPK harus berupa angka antara 0.00 - 4.00!"
+                    isValid = false
+                }
+
+                // Jika semua validasi lolos
+                if (isValid) {
+                    statusMessage = "Pendaftaran Berhasil Disimpan!\n\nNama: $nama\nNIM: $nim\nEmail: $email\nIPK: $ipkValue"
+                } else {
+                    statusMessage = ""
+                }
             },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Buka DetailScreen (Explicit Intent)")
+            Text("Submit Pendaftaran")
         }
 
-        // --- IMPLICIT INTENT ---
-        OutlinedButton(
-            onClick = {
-                // Menjalankan panggilan telepon dengan ACTION_DIAL dan parsing URI
-                val intent = Intent(Intent.ACTION_DIAL).apply {
-                    data = Uri.parse("tel:08123456789")
-                }
-                context.startActivity(intent)
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Hubungi Dosen (Implicit Intent)")
+        // Output Hasil
+        if (statusMessage.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(16.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+            ) {
+                Text(
+                    text = statusMessage,
+                    modifier = Modifier.padding(16.dp),
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
         }
     }
 }
 
-@Preview(showBackground = true, name = "Main Screen Preview")
+@Preview(showBackground = true, name = "Preview Formulir Beasiswa")
 @Composable
-fun IntentDemoScreenPreview() {
+fun FormulirBeasiswaScreenPreview() {
     TrilogiTheme {
-        // Scaffold atau Surface bisa ditambahkan jika ingin background default yang rapi
+        // Surface ditambahkan agar latar belakang aplikasi menyesuaikan tema (terang/gelap)
         Surface(modifier = Modifier.fillMaxSize()) {
-            IntentDemoScreen()
+            FormulirBeasiswaScreen()
         }
     }
 }
