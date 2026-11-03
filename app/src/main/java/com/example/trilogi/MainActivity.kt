@@ -1,6 +1,7 @@
 package com.example.trilogi
 
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
@@ -22,10 +23,19 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.hide(WindowInsetsCompat.Type.statusBars())
+        controller.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+
         setContent {
             TrilogiTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -39,11 +49,10 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun BukuCatatanScreen() {
     val context = LocalContext.current
-    // Ambil DAO dari singleton database (dibuat sekali saja)
     val dao = remember { AppDatabase.getDatabase(context).bukuCatatanDao() }
     val scope = rememberCoroutineScope()
 
-    // STATE FORM: rememberSaveable agar isi form tidak hilang saat layar diputar
+    // ---------- STATE FORM ----------
     var judul by rememberSaveable { mutableStateOf("") }
     var kategori by rememberSaveable { mutableStateOf("") }
     var isi by rememberSaveable { mutableStateOf("") }
@@ -52,16 +61,63 @@ fun BukuCatatanScreen() {
     var kategoriError by rememberSaveable { mutableStateOf<String?>(null) }
     var isiError by rememberSaveable { mutableStateOf<String?>(null) }
 
-    // STATE DAFTAR: berasal dari database (persistent), bukan dari memori
+    // null  = mode TAMBAH, berisi id = mode EDIT (catatan yang sedang diubah)
+    var idEdit by rememberSaveable { mutableStateOf<Int?>(null) }
+
+    // null = dialog tertutup, berisi id = dialog konfirmasi hapus tampil
+    var idHapus by rememberSaveable { mutableStateOf<Int?>(null) }
+
+    // ---------- STATE DAFTAR (sumber datanya: Room) ----------
     val daftarCatatan = remember { mutableStateListOf<BukuCatatanEntity>() }
 
-    // READ saat layar pertama kali tampil -> bukti data persisten setelah app di-kill
-    LaunchedEffect(Unit) {
+    // READ: baca dari database (IO), isi ke state (Main)
+    suspend fun muatUlang() {
         val data = withContext(Dispatchers.IO) { dao.getAllCatatan() }
         daftarCatatan.clear()
         daftarCatatan.addAll(data)
     }
 
+    fun resetForm() {
+        judul = ""
+        kategori = ""
+        isi = ""
+        judulError = null
+        kategoriError = null
+        isiError = null
+        idEdit = null
+    }
+
+    LaunchedEffect(Unit) { muatUlang() }
+
+    // ---------- DIALOG KONFIRMASI HAPUS ----------
+    idHapus?.let { id ->
+        val target = daftarCatatan.firstOrNull { it.id == id }
+        AlertDialog(
+            onDismissRequest = { idHapus = null },
+            title = { Text("Konfirmasi Hapus") },
+            text = { Text("Yakin ingin menghapus catatan \"${target?.judul ?: ""}\"?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        idHapus = null
+                        scope.launch {
+                            withContext(Dispatchers.IO) { dao.deleteById(id) }
+                            if (idEdit == id) resetForm()
+                            muatUlang()
+                            Toast.makeText(context, "Catatan dihapus", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                ) {
+                    Text("Ya, Hapus", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { idHapus = null }) { Text("Batal") }
+            }
+        )
+    }
+
+    // ---------- TAMPILAN ----------
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -69,7 +125,7 @@ fun BukuCatatanScreen() {
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
-            text = "Buku Catatan (Room Database)",
+            text = if (idEdit == null) "Tambah Catatan" else "Edit Catatan",
             fontSize = 20.sp,
             color = MaterialTheme.colorScheme.primary
         )
@@ -77,10 +133,7 @@ fun BukuCatatanScreen() {
 
         OutlinedTextField(
             value = judul,
-            onValueChange = {
-                judul = it
-                judulError = null
-            },
+            onValueChange = { judul = it; judulError = null },
             label = { Text("Judul") },
             isError = judulError != null,
             supportingText = { judulError?.let { Text(it) } },
@@ -89,10 +142,7 @@ fun BukuCatatanScreen() {
 
         OutlinedTextField(
             value = kategori,
-            onValueChange = {
-                kategori = it
-                kategoriError = null
-            },
+            onValueChange = { kategori = it; kategoriError = null },
             label = { Text("Kategori (mis. Kuliah, Pribadi)") },
             isError = kategoriError != null,
             supportingText = { kategoriError?.let { Text(it) } },
@@ -101,10 +151,7 @@ fun BukuCatatanScreen() {
 
         OutlinedTextField(
             value = isi,
-            onValueChange = {
-                isi = it
-                isiError = null
-            },
+            onValueChange = { isi = it; isiError = null },
             label = { Text("Isi Catatan") },
             minLines = 2,
             isError = isiError != null,
@@ -112,51 +159,70 @@ fun BukuCatatanScreen() {
             modifier = Modifier.fillMaxWidth()
         )
 
-        Button(
-            onClick = {
-                var isValid = true
-                if (judul.isBlank()) {
-                    judulError = "Judul wajib diisi!"
-                    isValid = false
-                }
-                if (kategori.isBlank()) {
-                    kategoriError = "Kategori wajib diisi!"
-                    isValid = false
-                }
-                if (isi.isBlank()) {
-                    isiError = "Isi catatan wajib diisi!"
-                    isValid = false
-                }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = {
+                    // 1) Validasi
+                    var isValid = true
+                    if (judul.isBlank()) { judulError = "Judul wajib diisi!"; isValid = false }
+                    if (kategori.isBlank()) { kategoriError = "Kategori wajib diisi!"; isValid = false }
+                    if (isi.isBlank()) { isiError = "Isi catatan wajib diisi!"; isValid = false }
+                    if (!isValid) return@Button
 
-                if (isValid) {
-                    val tanggal = SimpleDateFormat("dd MMM yyyy HH:mm", Locale.getDefault())
+                    // 2) Salin nilai ke variabel lokal sebelum pindah thread
+                    val sedangEdit = idEdit
+                    val judulFinal = judul.trim()
+                    val kategoriFinal = kategori.trim()
+                    val isiFinal = isi.trim()
+                    val tanggalLama = daftarCatatan.firstOrNull { it.id == sedangEdit }?.tanggalDibuat
+                    val tanggalBaru = SimpleDateFormat("dd MMM yyyy HH:mm", Locale.getDefault())
                         .format(Date())
-                    val dataBaru = BukuCatatanEntity(
-                        judul = judul.trim(),
-                        isi = isi.trim(),
-                        kategori = kategori.trim(),
-                        tanggalDibuat = tanggal
-                    )
 
-                    // INSERT + READ di background thread (Dispatchers.IO),
-                    // lalu update UI di Main thread (withContext(Dispatchers.Main))
-                    scope.launch(Dispatchers.IO) {
-                        dao.insertCatatan(dataBaru)
-                        val listData = dao.getAllCatatan()
-
-                        withContext(Dispatchers.Main) {
-                            daftarCatatan.clear()
-                            daftarCatatan.addAll(listData)
-                            judul = ""
-                            kategori = ""
-                            isi = ""
+                    // 3) CREATE atau UPDATE di background thread
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            if (sedangEdit == null) {
+                                dao.insertCatatan(
+                                    BukuCatatanEntity(
+                                        judul = judulFinal,
+                                        isi = isiFinal,
+                                        kategori = kategoriFinal,
+                                        tanggalDibuat = tanggalBaru
+                                    )
+                                )
+                            } else {
+                                dao.updateCatatan(
+                                    BukuCatatanEntity(
+                                        id = sedangEdit, // id sama = Room tahu baris mana yang diubah
+                                        judul = judulFinal,
+                                        isi = isiFinal,
+                                        kategori = kategoriFinal,
+                                        tanggalDibuat = tanggalLama ?: tanggalBaru
+                                    )
+                                )
+                            }
                         }
+                        // 4) Kembali ke Main thread: refresh daftar + kosongkan form
+                        muatUlang()
+                        resetForm()
+                        Toast.makeText(
+                            context,
+                            if (sedangEdit == null) "Catatan tersimpan" else "Catatan diperbarui",
+                            Toast.LENGTH_SHORT
+                        ).show()
                     }
+                },
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(if (idEdit == null) "Simpan Catatan" else "Perbarui Catatan")
+            }
+
+            // Tombol batal hanya muncul saat mode edit
+            if (idEdit != null) {
+                OutlinedButton(onClick = { resetForm() }) {
+                    Text("Batal")
                 }
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Simpan Catatan")
+            }
         }
 
         HorizontalDivider()
@@ -173,20 +239,40 @@ fun BukuCatatanScreen() {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         } else {
+            // LazyColumn = pengganti RecyclerView (hanya merender item yang terlihat)
             LazyColumn(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                // key = id membantu Compose mengenali item yang berubah (peran mirip DiffUtil)
                 items(daftarCatatan, key = { it.id }) { catatan ->
-                    CatatanCard(catatan)
+                    CatatanCard(
+                        catatan = catatan,
+                        onEdit = {
+                            // Isi form dengan data yang dipilih, lalu masuk mode edit
+                            judul = catatan.judul
+                            kategori = catatan.kategori
+                            isi = catatan.isi
+                            judulError = null
+                            kategoriError = null
+                            isiError = null
+                            idEdit = catatan.id
+                        },
+                        onDelete = { idHapus = catatan.id }
+                    )
                 }
             }
         }
     }
 }
 
+// Lambda callback (onEdit, onDelete) = sama seperti onClick: (Mahasiswa) -> Unit di materi
 @Composable
-fun CatatanCard(catatan: BukuCatatanEntity) {
+fun CatatanCard(
+    catatan: BukuCatatanEntity,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -209,6 +295,15 @@ fun CatatanCard(catatan: BukuCatatanEntity) {
                 text = catatan.isi,
                 color = MaterialTheme.colorScheme.onPrimaryContainer
             )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(onClick = onEdit) { Text("Edit") }
+                TextButton(onClick = onDelete) {
+                    Text("Hapus", color = MaterialTheme.colorScheme.error)
+                }
+            }
         }
     }
 }
