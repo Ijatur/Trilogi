@@ -1,22 +1,27 @@
 package com.example.trilogi
 
 import android.os.Bundle
-import android.util.Patterns
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.trilogi.ui.theme.TrilogiTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -24,7 +29,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             TrilogiTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    FormulirBeasiswaScreen()
+                    BukuCatatanScreen()
                 }
             }
         }
@@ -32,160 +37,188 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun FormulirBeasiswaScreen() {
-    // STATE MANAGEMENT: Menggunakan rememberSaveable sebagai pengganti onSaveInstanceState.
-    // Ini mencegah 'The Disappearing Data Problem' (State Loss) saat terjadi rotasi layar ponsel.
-    var nama by rememberSaveable { mutableStateOf("") }
-    var nim by rememberSaveable { mutableStateOf("") }
-    var email by rememberSaveable { mutableStateOf("") }
-    var ipk by rememberSaveable { mutableStateOf("") }
+fun BukuCatatanScreen() {
+    val context = LocalContext.current
+    // Ambil DAO dari singleton database (dibuat sekali saja)
+    val dao = remember { AppDatabase.getDatabase(context).bukuCatatanDao() }
+    val scope = rememberCoroutineScope()
 
-    // State untuk menyimpan pesan error spesifik
-    var namaError by rememberSaveable { mutableStateOf<String?>(null) }
-    var nimError by rememberSaveable { mutableStateOf<String?>(null) }
-    var emailError by rememberSaveable { mutableStateOf<String?>(null) }
-    var ipkError by rememberSaveable { mutableStateOf<String?>(null) }
+    // STATE FORM: rememberSaveable agar isi form tidak hilang saat layar diputar
+    var judul by rememberSaveable { mutableStateOf("") }
+    var kategori by rememberSaveable { mutableStateOf("") }
+    var isi by rememberSaveable { mutableStateOf("") }
 
-    var statusMessage by rememberSaveable { mutableStateOf("") }
+    var judulError by rememberSaveable { mutableStateOf<String?>(null) }
+    var kategoriError by rememberSaveable { mutableStateOf<String?>(null) }
+    var isiError by rememberSaveable { mutableStateOf<String?>(null) }
 
-    val scrollState = rememberScrollState()
+    // STATE DAFTAR: berasal dari database (persistent), bukan dari memori
+    val daftarCatatan = remember { mutableStateListOf<BukuCatatanEntity>() }
+
+    // READ saat layar pertama kali tampil -> bukti data persisten setelah app di-kill
+    LaunchedEffect(Unit) {
+        val data = withContext(Dispatchers.IO) { dao.getAllCatatan() }
+        daftarCatatan.clear()
+        daftarCatatan.addAll(data)
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp)
-            .verticalScroll(scrollState),
+            .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
-            text = "Formulir Pendaftaran Beasiswa",
+            text = "Buku Catatan (Room Database)",
             fontSize = 20.sp,
             color = MaterialTheme.colorScheme.primary
         )
         HorizontalDivider()
 
-        // INPUT: Nama
         OutlinedTextField(
-            value = nama,
+            value = judul,
             onValueChange = {
-                nama = it
-                namaError = null // Konsep instant feedback (mirip doAfterTextChanged)
+                judul = it
+                judulError = null
             },
-            label = { Text("Nama Lengkap") },
-            isError = namaError != null,
-            supportingText = { namaError?.let { Text(it) } },
+            label = { Text("Judul") },
+            isError = judulError != null,
+            supportingText = { judulError?.let { Text(it) } },
             modifier = Modifier.fillMaxWidth()
         )
 
-        // INPUT: NIM (8-10 digit)
         OutlinedTextField(
-            value = nim,
+            value = kategori,
             onValueChange = {
-                nim = it
-                nimError = null
+                kategori = it
+                kategoriError = null
             },
-            label = { Text("NIM") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            isError = nimError != null,
-            supportingText = { nimError?.let { Text(it) } },
+            label = { Text("Kategori (mis. Kuliah, Pribadi)") },
+            isError = kategoriError != null,
+            supportingText = { kategoriError?.let { Text(it) } },
             modifier = Modifier.fillMaxWidth()
         )
 
-        // INPUT: Email
         OutlinedTextField(
-            value = email,
+            value = isi,
             onValueChange = {
-                email = it
-                emailError = null
+                isi = it
+                isiError = null
             },
-            label = { Text("Email Mahasiswa") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-            isError = emailError != null,
-            supportingText = { emailError?.let { Text(it) } },
+            label = { Text("Isi Catatan") },
+            minLines = 2,
+            isError = isiError != null,
+            supportingText = { isiError?.let { Text(it) } },
             modifier = Modifier.fillMaxWidth()
         )
-
-        // INPUT: IPK (Double 0.00-4.00)
-        OutlinedTextField(
-            value = ipk,
-            onValueChange = {
-                ipk = it
-                ipkError = null
-            },
-            label = { Text("IPK") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            isError = ipkError != null,
-            supportingText = { ipkError?.let { Text(it) } },
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
 
         Button(
             onClick = {
                 var isValid = true
-
-                // Validasi Nama
-                if (nama.isBlank()) {
-                    namaError = "Nama wajib diisi!"
+                if (judul.isBlank()) {
+                    judulError = "Judul wajib diisi!"
+                    isValid = false
+                }
+                if (kategori.isBlank()) {
+                    kategoriError = "Kategori wajib diisi!"
+                    isValid = false
+                }
+                if (isi.isBlank()) {
+                    isiError = "Isi catatan wajib diisi!"
                     isValid = false
                 }
 
-                // Validasi NIM: Panjang karakter 8-10 digit
-                if (nim.length !in 8..10) {
-                    nimError = "NIM harus berjumlah 8 hingga 10 digit!"
-                    isValid = false
-                }
-
-                // Validasi Email: Menggunakan Patterns.EMAIL_ADDRESS
-                if (!Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
-                    emailError = "Format email tidak valid!"
-                    isValid = false
-                }
-
-                // Validasi IPK: Konversi angka aman menggunakan toDoubleOrNull()
-                val ipkValue = ipk.toDoubleOrNull()
-                if (ipkValue == null || ipkValue < 0.0 || ipkValue > 4.0) {
-                    ipkError = "IPK harus berupa angka antara 0.00 - 4.00!"
-                    isValid = false
-                }
-
-                // Jika semua validasi lolos
                 if (isValid) {
-                    statusMessage = "Pendaftaran Berhasil Disimpan!\n\nNama: $nama\nNIM: $nim\nEmail: $email\nIPK: $ipkValue"
-                } else {
-                    statusMessage = ""
+                    val tanggal = SimpleDateFormat("dd MMM yyyy HH:mm", Locale.getDefault())
+                        .format(Date())
+                    val dataBaru = BukuCatatanEntity(
+                        judul = judul.trim(),
+                        isi = isi.trim(),
+                        kategori = kategori.trim(),
+                        tanggalDibuat = tanggal
+                    )
+
+                    // INSERT + READ di background thread (Dispatchers.IO),
+                    // lalu update UI di Main thread (withContext(Dispatchers.Main))
+                    scope.launch(Dispatchers.IO) {
+                        dao.insertCatatan(dataBaru)
+                        val listData = dao.getAllCatatan()
+
+                        withContext(Dispatchers.Main) {
+                            daftarCatatan.clear()
+                            daftarCatatan.addAll(listData)
+                            judul = ""
+                            kategori = ""
+                            isi = ""
+                        }
+                    }
                 }
             },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Submit Pendaftaran")
+            Text("Simpan Catatan")
         }
 
-        // Output Hasil
-        if (statusMessage.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(16.dp))
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+        HorizontalDivider()
+
+        Text(
+            text = "Daftar Catatan (${daftarCatatan.size})",
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+
+        if (daftarCatatan.isEmpty()) {
+            Text(
+                text = "Belum ada catatan",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    text = statusMessage,
-                    modifier = Modifier.padding(16.dp),
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
+                items(daftarCatatan, key = { it.id }) { catatan ->
+                    CatatanCard(catatan)
+                }
             }
         }
     }
 }
 
-@Preview(showBackground = true, name = "Preview Formulir Beasiswa")
 @Composable
-fun FormulirBeasiswaScreenPreview() {
+fun CatatanCard(catatan: BukuCatatanEntity) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        )
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = catatan.judul,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+            Text(
+                text = "${catatan.kategori} • ${catatan.tanggalDibuat}",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = catatan.isi,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+        }
+    }
+}
+
+@Preview(showBackground = true, name = "Preview Buku Catatan")
+@Composable
+fun BukuCatatanScreenPreview() {
     TrilogiTheme {
-        // Surface ditambahkan agar latar belakang aplikasi menyesuaikan tema (terang/gelap)
         Surface(modifier = Modifier.fillMaxSize()) {
-            FormulirBeasiswaScreen()
+            BukuCatatanScreen()
         }
     }
 }
